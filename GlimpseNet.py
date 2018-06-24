@@ -6,7 +6,7 @@ class GlimpseNet(object):
       self.original_size = params.original_size
       self.num_channels = params.num_channels
       self.sensor_size = params.sensor_size
-      self.win_size = params.win_size
+      self.bandwidth = params.bandwidth
       self.minRadius = params.minRadius
       self.depth = params.depth
 
@@ -16,6 +16,7 @@ class GlimpseNet(object):
       self.loc_dim = params.loc_dim
 
       self.images_ph = images_ph
+      self.batch_size = params.batch_size
 
       self.init_weights()
 
@@ -34,22 +35,49 @@ class GlimpseNet(object):
 
     def get_glimpse(self, loc):
 
-      imgs = tf.reshape(self.images_ph, [
-          tf.shape(self.images_ph)[0], self.original_size, self.original_size,
-          self.num_channels
-      ])
+        loc = tf.round(((loc + 1) / 2.0) * self.original_size)  # normLoc coordinates are between -1 and 1
+        loc = tf.cast(loc, tf.int32)
 
-      #Extract a set of glimpses (both normalized and centered, areas of non-overlap between window and image are
-      #filled with RANDOM noise
-      glimpse_imgs = tf.image.extract_glimpse(imgs,
-                                              [self.win_size, self.win_size], loc)
+        img = tf.reshape(self.images_ph,
+                         (self.batch_size, self.original_size, self.original_size, self.num_channels))
 
-      #Return a vector with glimpses
-      glimpse_imgs = tf.reshape(glimpse_imgs, [
-          tf.shape(loc)[0], self.win_size * self.win_size * self.num_channels
-      ])
+        # process each image individually
+        zooms = []
+        for k in range(self.batch_size):
+            imgZooms = []
+            one_img = img[k, :, :, :]
+            max_radius = self.minRadius * (2 ** (self.depth - 1))
+            offset = 2 * max_radius
 
-      return glimpse_imgs
+            # pad image with zeros
+            one_img = tf.image.pad_to_bounding_box(one_img, offset, offset, \
+                                                   max_radius * 4 + self.original_size,
+                                                   max_radius * 4 + self.original_size)
+
+            for i in range(self.depth):
+                r = int(self.minRadius * (2 ** (i)))
+
+                d_raw = 2 * r
+                d = tf.constant(d_raw, shape=[1])
+                d = tf.tile(d, [2])
+                loc_k = loc[k, :]
+                adjusted_loc = offset + loc_k - r
+                one_img2 = tf.reshape(one_img, (one_img.get_shape()[0].value, one_img.get_shape()[1].value))
+
+                # crop image to (d x d)
+                zoom = tf.slice(one_img2, adjusted_loc, d)
+
+                # resize cropped image to (sensorBandwidth x sensorBandwidth)
+                zoom = tf.image.resize_bilinear(tf.reshape(zoom, (1, d_raw, d_raw, 1)),
+                                                (self.bandwidth, self.bandwidth))
+                zoom = tf.reshape(zoom, (self.bandwidth, self.bandwidth))
+                imgZooms.append(zoom)
+
+            zooms.append(tf.stack(imgZooms))
+
+        zooms = tf.stack(zooms)
+
+        return zooms
 
     def __call__(self, loc):
       glimpse_input = self.get_glimpse(loc)

@@ -5,10 +5,13 @@ seq2seq = tf.contrib.legacy_seq2seq
 
 class CoreNet(object):
     def __init__(self, params, glimpse_net, loc_net):
+        self.batch_size = params.batch_size
         self.cell_core_size = params.cell_core_size
         self.num_glimpses = params.num_glimpses
         self.glimpse_net = glimpse_net
         self.loc_net = loc_net
+
+        self.glimpse_images = []
         self.loc_mean_arr = []
         self.sampled_loc_arr = []
 
@@ -16,6 +19,7 @@ class CoreNet(object):
     def get_next_input(self, output, i):
       loc, loc_mean = self.loc_net(output)
       gl_next = self.glimpse_net(loc)
+      self.glimpse_images.append(self.glimpse_net.get_glimpse(loc))
       self.loc_mean_arr.append(loc_mean)
       self.sampled_loc_arr.append(loc)
 
@@ -37,7 +41,8 @@ class CoreNet(object):
         outputs, _ = seq2seq.rnn_decoder(
             inputs, init_state, lstm_cell, loop_function=self.get_next_input)
 
-        return outputs
+
+        return outputs, self.sampled_loc_arr, self.glimpse_images
 
 
 
