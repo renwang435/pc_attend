@@ -148,9 +148,8 @@ train_op = opt.apply_gradients(zip(grads, var_list), global_step=global_step)
 with tf.Session() as sess:
     sess.run(tf.global_variables_initializer())
     saver = tf.train.Saver(max_to_keep=99999999)
-    epoch = 0
+    # epoch = 0
     for i in range(n_steps):
-        epoch += 1
         images, labels = mnist.train.next_batch(params.batch_size)
         # duplicate M times, see eqn (2)
         # images = np.tile(images, [params.M, 1])
@@ -203,8 +202,8 @@ with tf.Session() as sess:
 
                     # display the glimpses
                     for y in range(params.num_glimpses):
-                        txt.set_text('Epoch: %.6d \nPrediction: %i -- Truth: %i\nStep: %i/%i'
-                                     % (epoch, pred[0], true[0], (y + 1),
+                        txt.set_text('Step: %.6d \nPrediction: %i -- Truth: %i\nGlimpse: %i/%i'
+                                     % (i, pred[0], true[0], (y + 1),
                                         params.num_glimpses))
 
                         for x in range(params.depth):
