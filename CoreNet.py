@@ -5,10 +5,11 @@ seq2seq = tf.contrib.legacy_seq2seq
 
 class CoreNet(object):
     def __init__(self, params, glimpse_net, loc_net):
-        self.batch_size = params.batch_size
         self.cell_core_size = params.cell_core_size
         self.num_glimpses = params.num_glimpses
         self.glimpse_net = glimpse_net
+
+        self.loc_dim = params.loc_dim
         self.loc_net = loc_net
 
         self.glimpse_images = []
@@ -27,7 +28,7 @@ class CoreNet(object):
 
     def init_core(self, num_examples):
         # Take an initial glimpse based on some random initial location
-        init_loc = tf.random_uniform((num_examples, 2), minval=-1, maxval=1)
+        init_loc = tf.random_uniform((num_examples, self.loc_dim), minval=-1.001, maxval=1.001)
         init_glimpse = self.glimpse_net(init_loc)
 
         return init_glimpse
@@ -40,7 +41,6 @@ class CoreNet(object):
         inputs.extend([0] * (self.num_glimpses))
         outputs, _ = seq2seq.rnn_decoder(
             inputs, init_state, lstm_cell, loop_function=self.get_next_input)
-
 
         return outputs, self.sampled_loc_arr, self.glimpse_images
 

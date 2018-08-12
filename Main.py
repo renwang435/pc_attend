@@ -1,9 +1,17 @@
 import logging
 import time
 import sys
+import platform
 
 import numpy as np
+import matplotlib
+if (platform.system() == 'Darwin'):
+    matplotlib.use('TkAgg')     # For visualization on OS X
+
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+
+
 from tensorflow.examples.tutorials.mnist import input_data
 
 from CoreNet import CoreNet
@@ -14,46 +22,56 @@ from Utils import *
 
 logging.getLogger().setLevel(logging.INFO)
 
-mnist = input_data.read_data_sets('MNIST_data', one_hot=False)
+# mnist = input_data.read_data_sets('MNIST_data', one_hot=False)
 
 params = Params()
+data_dir = ('modelnet40_normal_resampled')
+pc_dataset = read_data_sets(data_dir, params.num_points_per_pc)
+
+label_list = open(data_dir + '/modelnet40_shape_names.txt', 'r')
+all_labels = label_list.read().split('\n')
+all_labels = [i for i in all_labels if i != '']
+label_list.close()
+
 n_steps = params.step
 
 save_dir = "chckPts/"
 save_prefix = "save"
 
 draw = 1
-animate = 1
+display = 1
+save = 1
+pause_time = 2 # Useful for debugging, set higher to allow more time to interact with plots
 
-# Helper function 1/2 for visualization
-def toMnistCoordinates(coordinate_tanh, img_size):
-    '''
-    Transform coordinate in [-1,1] to mnist
-    :param coordinate_tanh: vector in [-1,1] x [-1,1]
-    :return: vector in the corresponding mnist coordinate
-    '''
-    return np.round(((coordinate_tanh + 1) / 2.0) * img_size)
+# Helper function for visualization
+def plotWholePC(pc, sampled_locs_fetched):
+    pc = np.reshape(pc, (params.num_points_per_pc, params.loc_dim))
+    xs = pc[:, 0]
+    ys = pc[:, 1]
+    zs = pc[:, 2]
+    
+    ax0.scatter(xs, ys, zs)
 
-# Helper function 2/2 for visualization
-def plotWholeImg(img, img_size, sampled_locs_fetched):
-    plt.imshow(np.reshape(img, [img_size, img_size]),
-               cmap=plt.get_cmap('gray'), interpolation="nearest")
+    # # visualize the trace of successive nGlimpses (note that x and y coordinates are "flipped")
+    ax0.plot(sampled_locs_fetched[0, :, 0], sampled_locs_fetched[0, :, 1], sampled_locs_fetched[0, :, 2], 
+            '-o', color='lawngreen')
+    
+    last_loc_movement = sampled_locs_fetched[0, -2:]
+    ax0.plot(last_loc_movement[:, 0], last_loc_movement[:, 1], last_loc_movement[:, 2], 
+            '-o', color='red')
 
-    plt.ylim((img_size - 1, 0))
-    plt.xlim((0, img_size - 1))
-
-    # transform the coordinate to mnist map
-    sampled_locs_mnist_fetched = toMnistCoordinates(sampled_locs_fetched, img_size)
-    # visualize the trace of successive nGlimpses (note that x and y coordinates are "flipped")
-    plt.plot(sampled_locs_mnist_fetched[0, :, 1], sampled_locs_mnist_fetched[0, :, 0], '-o',
-             color='lawngreen')
-    plt.plot(sampled_locs_mnist_fetched[0, -1, 1], sampled_locs_mnist_fetched[0, -1, 0], 'o',
-             color='red')
+# Helper function for visualization
+def plotGlimpses(f_glimpse_images, glimpse_axes):
+    for i in range(len(f_glimpse_images)):
+        xs = f_glimpse_images[i, 0, :, 0]
+        ys = f_glimpse_images[i, 0, :, 1]
+        zs = f_glimpse_images[i, 0, :, 2]
+    
+        glimpse_axes[i].scatter(xs, ys, zs)
 
 # placeholders
 images_ph = tf.placeholder(tf.float32,
-                           [None, params.original_size * params.original_size *
-                            params.num_channels])
+                        [None, params.num_points_per_pc * params.loc_dim])
 labels_ph = tf.placeholder(tf.int64, [None])
 
 #Build our Glimpse and Location networks
@@ -72,14 +90,11 @@ with tf.variable_scope('core_net'):
 
 # For visualization purposes
 sampled_locs = tf.concat(axis=0, values=sampled_loc_arr)
-sampled_locs = tf.reshape(sampled_locs, (params.num_glimpses, params.batch_size, 2))
+sampled_locs = tf.reshape(sampled_locs, (params.num_glimpses, params.batch_size, params.loc_dim))
 sampled_locs = tf.transpose(sampled_locs, [1, 0, 2])
 
 glimpse_images = tf.concat(axis=0, values=glimpse_images)
 
-
-# print(sampled_locs)
-# sys.exit(1)
 
 # Define time-independent baselines for variance reduction (as per eqn (2) in the paper)
 with tf.variable_scope('baseline'):
@@ -100,11 +115,11 @@ output = outputs[-1]
 
 # Build action/classification network.
 with tf.variable_scope('cls'):
-  w_logit = weight_variable((params.cell_output_size, params.num_classes))
-  b_logit = bias_variable((params.num_classes,))
+    w_logit = weight_variable((params.cell_output_size, params.num_classes))
+    b_logit = bias_variable((params.num_classes,))
 logits = tf.nn.xw_plus_b(output, w_logit, b_logit)
 softmax = tf.nn.softmax(logits)
-max_p_y = tf.arg_max(softmax, 1)
+max_p_y = tf.argmax(softmax, axis=1)
 correct_y = tf.cast(labels_ph, tf.int64)
 
 # Define our cross entropy loss first for the classification task
@@ -132,7 +147,7 @@ grads, _ = tf.clip_by_global_norm(grads, params.max_grad_norm)
 # learning rate
 global_step = tf.get_variable(
     'global_step', [], initializer=tf.constant_initializer(0), trainable=False)
-training_steps_per_epoch = mnist.train.num_examples // params.batch_size
+training_steps_per_epoch = pc_dataset.train.num_examples // params.batch_size
 starter_learning_rate = params.lr_start
 # decay per training epoch
 learning_rate = tf.train.exponential_decay(
@@ -148,22 +163,24 @@ train_op = opt.apply_gradients(zip(grads, var_list), global_step=global_step)
 with tf.Session() as sess:
     sess.run(tf.global_variables_initializer())
     saver = tf.train.Saver(max_to_keep=99999999)
-    # epoch = 0
     for i in range(n_steps):
-        images, labels = mnist.train.next_batch(params.batch_size)
+        images, labels = pc_dataset.train.next_batch(params.batch_size)
         # duplicate M times, see eqn (2)
         # images = np.tile(images, [params.M, 1])
         # labels = np.tile(labels, [params.M])
-        loc_net.samping = True
+        loc_net.sampling = True
 
-        glimpse_images_fetched, sampled_locs_fetched, pred, true, adv_val, baselines_mse_val, xent_val, \
-        logllratio_val, reward_val, loss_val, lr_val, _ = sess.run(
-                [glimpse_images, sampled_loc_arr, max_p_y, correct_y, advs, baselines_mse, xent, logllratio,
+        (glimpse_images_fetched, sampled_locs_fetched, pred, true, 
+            adv_val, baselines_mse_val, xent_val, logllratio_val,
+            reward_val, loss_val, lr_val, _) = sess.run(
+                [glimpse_images, sampled_loc_arr, max_p_y, correct_y, 
+                advs, baselines_mse, xent, logllratio,
                 reward, loss, learning_rate, train_op],
                 feed_dict={
                     images_ph: images,
                     labels_ph: labels
-                    })
+                })
+        
         if i and i % 100 == 0:
             logging.info('step {}: lr = {:3.6f}'.format(i, lr_val))
             logging.info(
@@ -174,66 +191,41 @@ with tf.Session() as sess:
 
             # Now we do some visualization
             if draw:
-                fig = plt.figure(1)
-                txt = fig.suptitle("-", fontsize=36, fontweight='bold')
-                plt.ion()
-                plt.show()
+                grid = plt.GridSpec(params.num_glimpses * 2, params.num_glimpses, wspace=0.4, hspace=0.3)
+                ax0 = plt.subplot(grid[0:params.num_glimpses, :], projection='3d')
+                glimpse_axes = []
+                for j in range(params.num_glimpses):
+                    curr_ax = plt.subplot(grid[params.num_glimpses:, j], projection='3d')
+                    glimpse_axes.append(curr_ax)
+                
+                txt = plt.suptitle("-", fontsize=36, fontweight='bold')
+                pred_text = str(all_labels[pred[0]])
+                true_text = str(all_labels[true[0]])
+                txt.set_text('PREDICTION: %s\nTRUTH: %s' % (pred_text, true_text))
+
                 plt.subplots_adjust(top=0.7)
-                plotImgs = []
-                img_size = params.original_size
 
-                f_glimpse_images = np.reshape(glimpse_images_fetched, \
-                                              (params.num_glimpses,
-                                               params.batch_size, params.depth,
-                                               params.bandwidth, params.bandwidth))
+                f_glimpse_images = np.reshape(glimpse_images_fetched,
+                                                (params.num_glimpses, params.batch_size,
+                                                params.num_points_per_glimpse, params.loc_dim))
 
-                if animate:
-                    fillList = False
-                    if len(plotImgs) == 0:
-                        fillList = True
+                # display the entire image along with the sampled locations
+                sampled_locs_fetched = np.transpose(sampled_locs_fetched, (1, 0, 2))
+                plotWholePC(images[0, :], sampled_locs_fetched)
 
-                    # display the first image in the in mini-batch
-                    nCols = params.depth + 1
-                    plt.subplot2grid((params.depth, nCols), (0, 1), rowspan=params.depth, colspan=params.depth)
+                # Display the glimpses
+                plotGlimpses(f_glimpse_images, glimpse_axes)
 
-                    # display the entire image
-                    sampled_locs_fetched = np.transpose(sampled_locs_fetched, (1, 0, 2))
-                    plotWholeImg(images[0, :], img_size, sampled_locs_fetched)
-
-                    # display the glimpses
-                    for y in range(params.num_glimpses):
-                        txt.set_text('Step: %.6d \nPrediction: %i -- Truth: %i\nGlimpse: %i/%i'
-                                     % (i, pred[0], true[0], (y + 1),
-                                        params.num_glimpses))
-
-                        for x in range(params.depth):
-                            plt.subplot(params.depth, nCols, 1 + nCols * x)
-                            if fillList:
-                                plotImg = plt.imshow(f_glimpse_images[y, 0, x], cmap=plt.get_cmap('gray'),
-                                                     interpolation="nearest")
-                                plotImg.autoscale()
-                                plotImgs.append(plotImg)
-                            else:
-                                plotImgs[x].set_data(f_glimpse_images[y, 0, x])
-                                plotImgs[x].autoscale()
-                        fillList = False
-
-                        # fig.canvas.draw()
-                        time.sleep(0.1)
-                        plt.pause(0.00005)
-
-                else:
-                    txt.set_text(
-                        'PREDICTION: %i\nTRUTH: %i' % (pred[0], true[0]))
-                    for x in range(params.depth):
-                        for y in range(params.num_glimpses):
-                            plt.subplot(params.depth, params.num_glimpses, x * params.num_glimpses + y + 1)
-                            plt.imshow(f_glimpse_images[y, 0, x], cmap=plt.get_cmap('gray'), interpolation="nearest")
-
+                if display:
+                    plt.ion()
                     plt.draw()
                     time.sleep(0.05)
-                    plt.pause(0.0001)
-
+                    plt.pause(pause_time)
+                elif save:
+                    plt.savefig('%s_%s_%s.png' % (str(i), pred_text, true_text))
+                    plt.close()
+                else:
+                    pass           
 
         if i and i % training_steps_per_epoch == 0:
             # Save model
@@ -241,7 +233,7 @@ with tf.Session() as sess:
             saver.save(sess, save_dir + save_prefix + str(i) + ".ckpt")
 
             # Evaluation
-            for dataset in [mnist.validation, mnist.test]:
+            for dataset in [pc_dataset.validation, pc_dataset.test]:
                 steps_per_epoch = dataset.num_examples // params.eval_batch_size
                 correct_cnt = 0
                 num_samples = steps_per_epoch * params.batch_size
@@ -253,18 +245,18 @@ with tf.Session() as sess:
                     # images = np.tile(images, [params.M, 1])
                     # labels = np.tile(labels, [params.M])
                     softmax_val = sess.run(softmax,
-                                     feed_dict={
-                                         images_ph: images,
-                                         labels_ph: labels
-                                     })
+                                    feed_dict={
+                                        images_ph: images,
+                                        labels_ph: labels
+                                    })
                     # softmax_val = np.reshape(softmax_val,
-                    #                    [params.M, -1, params.num_classes])
+                    #                 [params.M, -1, params.num_classes])
                     # softmax_val = np.mean(softmax_val, 0)
                     pred_labels_val = np.argmax(softmax_val, 1)
                     pred_labels_val = pred_labels_val.flatten()
                     correct_cnt += np.sum(pred_labels_val == labels_bak)
                 acc = correct_cnt / num_samples
-                if dataset == mnist.validation:
+                if dataset == pc_dataset.validation:
                     logging.info('valid accuracy = {}'.format(acc))
                 else:
                     logging.info('test accuracy = {}'.format(acc))

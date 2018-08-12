@@ -16,13 +16,13 @@ class LocNet(object):
 
     def __call__(self, input):
         #Take some hidden representation from the Core network and return the next location
-        mean = tf.clip_by_value(tf.nn.xw_plus_b(input, self.w, self.b), -1., 1.)
+        mean = tf.clip_by_value(tf.nn.xw_plus_b(input, self.w, self.b), -1.001, 1.001)
         mean = tf.stop_gradient(mean)   #Need to stop gradients as we train the Location network exclusively with REINFORCE
 
         if self._sampling:
           loc = mean + tf.random_normal(
               (tf.shape(input)[0], self.loc_dim), stddev=self.loc_std)
-          loc = tf.clip_by_value(loc, -1., 1.)
+          loc = tf.clip_by_value(loc, -1.001, 1.001)
         else:
           loc = mean
 

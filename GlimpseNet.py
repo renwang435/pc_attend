@@ -1,99 +1,115 @@
 from Utils import *
+import sys
 
 class GlimpseNet(object):
     def __init__(self, params, images_ph):
-      #See Params.py for explanation on parameters
-      self.original_size = params.original_size
-      self.num_channels = params.num_channels
-      self.sensor_size = params.sensor_size
-      self.bandwidth = params.bandwidth
-      self.minRadius = params.minRadius
-      self.depth = params.depth
+        #See Params.py for explanation on parameters
+        self.num_points_per_pc = params.num_points_per_pc
+        self.num_points_per_glimpse = params.num_points_per_glimpse
+        self.half_extent = params.cube_half_extent
 
-      self.hg_size = params.hg_size
-      self.hl_size = params.hl_size
-      self.g_size = params.g_size
-      self.loc_dim = params.loc_dim
+        self.sensor_size = params.sensor_size
+        self.hg_size = params.hg_size
+        self.hl_size = params.hl_size
+        self.g_size = params.g_size
+        self.loc_dim = params.loc_dim
 
-      self.images_ph = images_ph
-      self.batch_size = params.batch_size
+        self.images_ph = images_ph
+        self.batch_size = params.batch_size
 
-      self.init_weights()
+        self.init_weights()
 
     def init_weights(self):
 
-      #Initialize networks mapping retina representation and location to some hidden state
-      self.w_g0 = weight_variable((self.sensor_size, self.hg_size))
-      self.b_g0 = bias_variable((self.hg_size,))
-      self.w_l0 = weight_variable((self.loc_dim, self.hl_size))
-      self.b_l0 = bias_variable((self.hl_size,))
+        #Initialize networks mapping retina representation and location to some hidden state
+        self.w_g0 = weight_variable((self.num_points_per_glimpse * self.loc_dim, self.hg_size))
+        self.b_g0 = bias_variable((self.hg_size,))
+        self.w_l0 = weight_variable((self.loc_dim, self.hl_size))
+        self.b_l0 = bias_variable((self.hl_size,))
 
-      self.w_g1 = weight_variable((self.hg_size, self.g_size))
-      self.b_g1 = bias_variable((self.g_size,))
-      self.w_l1 = weight_variable((self.hl_size, self.g_size))
-      self.b_l1 = weight_variable((self.g_size,))
+        self.w_g1 = weight_variable((self.hg_size, self.g_size))
+        self.b_g1 = bias_variable((self.g_size,))
+        self.w_l1 = weight_variable((self.hl_size, self.g_size))
+        self.b_l1 = weight_variable((self.g_size,))
+
+    def true_fn(self, reduced_pc_z):
+        num_rand_samples = self.num_points_per_glimpse - tf.cast(tf.size(reduced_pc_z) / self.loc_dim, tf.int64)
+        rand_samples = tf.random_uniform((num_rand_samples, 3), minval=-1.001, maxval=1.001)
+        reduced_pc_z = tf.concat([reduced_pc_z, rand_samples], 0)
+
+        return reduced_pc_z
+
+    def false_fn(self, reduced_pc_z):
+        len_tensor = tf.cast(tf.size(reduced_pc_z) / self.loc_dim, tf.int64)
+        # indices = tf.py_func(np.random.choice, [len_tensor, 100, False], tf.int64)
+
+        # indices = np.random.choice(len_tensor, 100, replace=False)
+        idx = tf.random_shuffle(tf.range(len_tensor))[:100]
+        idx = tf.reshape(idx, (100, 1))
+        reduced_pc_z = tf.gather_nd(reduced_pc_z, idx)
+
+        return reduced_pc_z
 
     def get_glimpse(self, loc):
+        imgs = tf.reshape(self.images_ph, 
+                            [self.batch_size, self.num_points_per_pc, self.loc_dim])
 
-        loc = tf.round(((loc + 1) / 2.0) * self.original_size)  # normLoc coordinates are between -1 and 1
-        loc = tf.cast(loc, tf.int32)
-
-        img = tf.reshape(self.images_ph,
-                         (self.batch_size, self.original_size, self.original_size, self.num_channels))
-
-        # process each image individually
-        zooms = []
+        #Extract a set of glimpses (both normalized and centered, areas of non-overlap between window and image are
+        #filled with RANDOM noise
+        zooms= []
         for k in range(self.batch_size):
-            imgZooms = []
-            one_img = img[k, :, :, :]
-            max_radius = self.minRadius * (2 ** (self.depth - 1))
-            offset = 2 * max_radius
+            x = loc[k][0]
+            y = loc[k][1]
+            z = loc[k][2]
 
-            # pad image with zeros
-            one_img = tf.image.pad_to_bounding_box(one_img, offset, offset, \
-                                                   max_radius * 4 + self.original_size,
-                                                   max_radius * 4 + self.original_size)
+            x_min = x - self.half_extent
+            y_min = y - self.half_extent
+            z_min = z - self.half_extent
+            x_max = x + self.half_extent
+            y_max = y + self.half_extent
+            z_max = z + self.half_extent
 
-            for i in range(self.depth):
-                r = int(self.minRadius * (2 ** (i)))
+            one_pc = imgs[k, :, :]
 
-                d_raw = 2 * r
-                d = tf.constant(d_raw, shape=[1])
-                d = tf.tile(d, [2])
-                loc_k = loc[k, :]
-                adjusted_loc = offset + loc_k - r
-                one_img2 = tf.reshape(one_img, (one_img.get_shape()[0].value, one_img.get_shape()[1].value))
+            greater_x = tf.greater_equal(one_pc[:, 0], x_min)
+            reduced_pc_x = tf.boolean_mask(one_pc, greater_x)
+            less_x = tf.less_equal(reduced_pc_x[:, 0], x_max)
+            reduced_pc_x = tf.boolean_mask(reduced_pc_x, less_x)
 
-                # crop image to (d x d)
-                zoom = tf.slice(one_img2, adjusted_loc, d)
+            greater_y = tf.greater_equal(reduced_pc_x[:, 1], y_min)
+            reduced_pc_y = tf.boolean_mask(reduced_pc_x, greater_y)
+            less_y = tf.less_equal(reduced_pc_y[:, 1], y_max)
+            reduced_pc_y = tf.boolean_mask(reduced_pc_y, less_y)
 
-                # resize cropped image to (sensorBandwidth x sensorBandwidth)
-                zoom = tf.image.resize_bilinear(tf.reshape(zoom, (1, d_raw, d_raw, 1)),
-                                                (self.bandwidth, self.bandwidth))
-                zoom = tf.reshape(zoom, (self.bandwidth, self.bandwidth))
-                imgZooms.append(zoom)
+            greater_z = tf.greater_equal(reduced_pc_y[:, 2], z_min)
+            reduced_pc_z = tf.boolean_mask(reduced_pc_y, greater_z)
+            less_z = tf.less_equal(reduced_pc_z[:, 2], z_max)
+            reduced_pc_z = tf.boolean_mask(reduced_pc_z, less_z)
 
-            zooms.append(tf.stack(imgZooms))
+            reduced_pc_z = tf.cond(tf.less(tf.size(reduced_pc_z), self.num_points_per_glimpse * self.loc_dim), 
+                        lambda: self.true_fn(reduced_pc_z), lambda: self.false_fn(reduced_pc_z))
 
-        zooms = tf.stack(zooms)
+            zooms.append(tf.reshape(reduced_pc_z, (self.num_points_per_glimpse, self.loc_dim, 1)))
+        
+        glimpse_imgs = tf.stack(zooms)
 
-        return zooms
+        return glimpse_imgs
 
     def __call__(self, loc):
-      glimpse_input = self.get_glimpse(loc)
-      glimpse_input = tf.reshape(glimpse_input,
-                                 (tf.shape(loc)[0], self.sensor_size))
+        glimpse_input = self.get_glimpse(loc)
+        glimpse_input = tf.reshape(glimpse_input,
+                                (tf.shape(loc)[0], self.num_points_per_glimpse * self.loc_dim))
 
-      #See Section 4
-      #Mapping glimpse to some hidden representation
-      g = tf.nn.relu(tf.nn.xw_plus_b(glimpse_input, self.w_g0, self.b_g0))
-      g = tf.nn.xw_plus_b(g, self.w_g1, self.b_g1)
+        #See Section 4
+        #Mapping glimpse to some hidden representation
+        g = tf.nn.relu(tf.nn.xw_plus_b(glimpse_input, self.w_g0, self.b_g0))
+        g = tf.nn.xw_plus_b(g, self.w_g1, self.b_g1)
 
-      #Mapping location to some hidden representation
-      l = tf.nn.relu(tf.nn.xw_plus_b(loc, self.w_l0, self.b_l0))
-      l = tf.nn.xw_plus_b(l, self.w_l1, self.b_l1)
+        #Mapping location to some hidden representation
+        l = tf.nn.relu(tf.nn.xw_plus_b(loc, self.w_l0, self.b_l0))
+        l = tf.nn.xw_plus_b(l, self.w_l1, self.b_l1)
 
-      #Glimpse network combines glimpse sensor and location network encodings
-      g = tf.nn.relu(g + l)
+        #Glimpse network combines glimpse sensor and location network encodings
+        g = tf.nn.relu(g + l)
 
-      return g
+        return g
