@@ -20,7 +20,6 @@ class GlimpseNet(object):
         self.init_weights()
 
     def init_weights(self):
-
         #Initialize networks mapping retina representation and location to some hidden state
         self.w_g0 = weight_variable((self.num_points_per_glimpse * self.loc_dim, self.hg_size))
         self.b_g0 = bias_variable((self.hg_size,))
@@ -41,9 +40,6 @@ class GlimpseNet(object):
 
     def false_fn(self, reduced_pc_z):
         len_tensor = tf.cast(tf.size(reduced_pc_z) / self.loc_dim, tf.int64)
-        # indices = tf.py_func(np.random.choice, [len_tensor, 100, False], tf.int64)
-
-        # indices = np.random.choice(len_tensor, 100, replace=False)
         idx = tf.random_shuffle(tf.range(len_tensor))[:100]
         idx = tf.reshape(idx, (100, 1))
         reduced_pc_z = tf.gather_nd(reduced_pc_z, idx)

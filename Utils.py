@@ -120,9 +120,7 @@ def extract_pc_and_labels(data_dir,
                           all_labels, 
                           examples_indices):
     len_data = len(examples_indices)
-    # len_label = len(all_labels)
     data = np.empty((len_data, num_points_per_pc, 3))
-    # labels = np.zeros((len_data, len_label))
     labels = np.zeros((len_data,))
 
     for i, index in enumerate(examples_indices):
@@ -147,6 +145,7 @@ def read_data_sets(data_dir,
                    reshape=True,
                    seed=None):
     try:
+        print('Trying to load existing ModelNet40 datasets...')
         options = dict(reshape=reshape, seed=seed)
 
         train_pc = np.load('train_pc.npy')
@@ -155,6 +154,8 @@ def read_data_sets(data_dir,
         val_labels = np.load('val_labels.npy')
         test_pc = np.load('test_pc.npy')
         test_labels = np.load('test_labels.npy')
+
+        print('Building train, validation and test dataset objects...')
 
         train = DataSet(train_pc, train_labels, **options)
         validation = DataSet(val_pc, val_labels, **options)
@@ -215,12 +216,7 @@ def read_data_sets(data_dir,
         np.save('test_pc', test_pc)
         np.save('test_labels', test_labels)
 
-        train_pc = np.load('train_pc.npy')
-        train_labels = np.load('train_labels.npy')
-        val_pc = np.load('val_pc.npy')
-        val_labels = np.load('val_labels.npy')
-        test_pc = np.load('test_pc.npy')
-        test_labels = np.load('test_labels.npy')
+        print('Building train, validation and test dataset objects...')
 
         train = DataSet(train_pc, train_labels, **options)
         validation = DataSet(val_pc, val_labels, **options)

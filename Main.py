@@ -22,8 +22,6 @@ from Utils import *
 
 logging.getLogger().setLevel(logging.INFO)
 
-# mnist = input_data.read_data_sets('MNIST_data', one_hot=False)
-
 params = Params()
 data_dir = ('modelnet40_normal_resampled')
 pc_dataset = read_data_sets(data_dir, params.num_points_per_pc)
@@ -191,7 +189,7 @@ with tf.Session() as sess:
 
             # Now we do some visualization
             if draw:
-                grid = plt.GridSpec(params.num_glimpses * 2, params.num_glimpses, wspace=0.4, hspace=0.3)
+                grid = plt.GridSpec(params.num_glimpses * 2, params.num_glimpses, wspace=0.4, hspace=0.4)
                 ax0 = plt.subplot(grid[0:params.num_glimpses, :], projection='3d')
                 glimpse_axes = []
                 for j in range(params.num_glimpses):
