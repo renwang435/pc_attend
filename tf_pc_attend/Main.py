@@ -11,9 +11,6 @@ if (platform.system() == 'Darwin'):
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
-
-from tensorflow.examples.tutorials.mnist import input_data
-
 from CoreNet import CoreNet
 from GlimpseNet import GlimpseNet
 from LocNet import LocNet

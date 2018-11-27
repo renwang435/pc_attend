@@ -1,11 +1,15 @@
 import math
+import os
+import sys
 import matplotlib
 matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
+master_dir = 'modelnet40_normal_resampled'
+
 if __name__ == '__main__':
-    file = open('airplane_0273.txt', 'r')
+    file = open(os.path.join(master_dir, 'airplane', 'airplane_0273.txt'), 'r')
     all_points = file.read().split('\n')
     points = [i for i in all_points if i != '']
 

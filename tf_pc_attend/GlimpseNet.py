@@ -40,8 +40,8 @@ class GlimpseNet(object):
 
     def false_fn(self, reduced_pc_z):
         len_tensor = tf.cast(tf.size(reduced_pc_z) / self.loc_dim, tf.int64)
-        idx = tf.random_shuffle(tf.range(len_tensor))[:100]
-        idx = tf.reshape(idx, (100, 1))
+        idx = tf.random_shuffle(tf.range(len_tensor))[:self.num_points_per_glimpse]
+        idx = tf.reshape(idx, (self.num_points_per_glimpse, 1))
         reduced_pc_z = tf.gather_nd(reduced_pc_z, idx)
 
         return reduced_pc_z
